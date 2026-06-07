@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+**/*.pyc
+
+# Secrets
+.env
+
+# Frontend
+node_modules/
+client/dist/
