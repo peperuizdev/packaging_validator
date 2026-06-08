@@ -74,11 +74,11 @@ def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
 # Genera una valoración global en español con Haiku (modelo ligero).
 def _generate_narrative(report: ValidationReport) -> str:
     msg = _client().messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-haiku-4-5",
         max_tokens=200,
         messages=[{"role": "user", "content": build_narrative_prompt(report)}],
     )
-    record("claude", "claude-haiku-4-5-20251001", "narrative",
+    record("claude", "claude-haiku-4-5", "narrative",
            msg.usage.input_tokens, msg.usage.output_tokens)
     return msg.content[0].text.strip()
 
