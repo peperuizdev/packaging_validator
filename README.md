@@ -89,12 +89,12 @@ La valoración global en español se genera con Claude Haiku, Gemini Flash Lite 
 
 ---
 
-## El prompt final
+## Alternativa descartada: prompting por pasos con Claude
 
-El prompt evolucionó significativamente durante el desarrollo. La versión que mayor precisión demostró extrae cada campo como valor textual real (no solo presencia booleana), lo que permite un checklist de auditoría más rico:
+Durante el desarrollo se probó una estrategia de extracción encadenada exclusivamente con Claude, con un prompt que extraía cada campo como valor textual real (no presencia booleana):
 
 ```
-PROMPT_ARTWORK:
+PROMPT_ARTWORK (versión Claude):
 
 You are a cosmetics label auditor. This PDF is a packaging dieline.
 
@@ -127,48 +127,117 @@ Rules:
 - pao: digits + M from the open-jar symbol, e.g. 12M. [] if absent.
 ```
 
-```
-PROMPT_PACKAGE:
+La estrategia encadenada usaba tres llamadas consecutivas: extraer INCI, extraer checklist campo a campo y verificar ambigüedades.
 
-You are a cosmetics label auditor. These photos show different faces of the same physical package.
-Read every photo to build the complete label.
+**Resultado**: tasa de detección notablemente superior con el ejemplo de referencia.
 
-Output this JSON only — no prose, no markdown:
-{"ingredients":[],"may_contain":[],"ean":[],"ref_code":[],"manufacturer":[],
- "pao":[],"country_of_origin":[],"warnings":[],"claims":[],"website":[]}
-
-Rules:
-- ingredients: full INCI list in EXACT printed order (EU law: descending concentration).
-  One name per element. Split at commas between names; parentheses are part of a name.
-  Stop at the first (+/-) or [(+/-)] token.
-- may_contain: every colorant after the (+/-) MAY CONTAIN / [(+/-) MAY CONTAIN: marker.
-  Check every photo — this section may be on a different face. Separate list. [] if absent.
-- manufacturer: one element per printed line or logical block (brand / company / address line).
-  Copy exactly as printed, including punctuation.
-- claims: consumer-facing marketing phrases printed on the package, in ALL languages.
-  One element per sentence (split at each period — do not merge two sentences into one element).
-  Precaution phrases go in warnings, not here.
-- warnings: precaution phrases and distribution restrictions.
-- ean: 8 or 13 consecutive digits, no spaces.
-- ref_code: the product SKU near the barcode, distinct from EAN. [] if absent.
-- pao: digits + M from the open-jar symbol, e.g. 18M. [] if absent.
-```
-
-La implementación actual simplifica el checklist a presencia booleana (no extrae el valor de cada campo) para centrarse en la validación del INCI, que es el riesgo regulatorio principal.
+**Por qué se descartó**: dependía de características específicas de Claude (reutilización del documento entre turnos, caché de prompts). Replicarla con Gemini u OpenAI hubiera requerido arquitecturas distintas por proveedor, rompiendo la intercambiabilidad. Se priorizó un diseño agnóstico al proveedor con un único prompt por extracción.
 
 ---
 
-## Alternativa descartada: prompting por pasos con Claude
+## El prompt final
 
-Durante el desarrollo se probó una estrategia de extracción encadenada exclusivamente con Claude:
+Un único prompt por extracción, agnóstico al proveedor. El checklist se detecta como presencia booleana para centrarse en la validación del INCI, que es el riesgo regulatorio principal.
 
-1. Primera llamada: extraer solo los ingredientes INCI con instrucciones muy específicas de delimitación.
-2. Segunda llamada (con contexto del PDF ya cargado): extraer el checklist regulatorio campo a campo.
-3. Tercera llamada: verificar posibles ambigüedades detectadas en los pasos anteriores.
+```
+PROMPT_ARTWORK:
 
-**Resultado**: la tasa de detección correcta de ingredientes y campos fue notablemente superior del 100 % con el ejemplo de referencia.
+You are performing verbatim text extraction from a cosmetics packaging artwork (EU Regulation 1223/2009).
+Your task is transcription — do not apply chemistry knowledge, do not merge or group names.
 
-**Por qué se descartó**: la estrategia dependía de características específicas de Claude (reutilización del documento entre turnos, ventana de contexto extendida con caché de prompts). Replicarla con Gemini u OpenAI hubiera requerido arquitecturas distintas por proveedor, rompiendo la intercambiabilidad. Se priorizó un diseño agnóstico al proveedor con un único prompt por extracción.
+Extract ONLY from the consumer label panel (the colored rectangle labeled EXTÉRIEUR or equivalent).
+Ignore: DATA_SAP tables, filenames, print specifications, colour swatches.
+
+Output this JSON only — no prose, no markdown:
+{
+  "ingredients": [],
+  "may_contain": [],
+  "checklist": {
+    "ean": false,
+    "manufacturer": false,
+    "pao": false,
+    "country_of_origin": false,
+    "warnings": false,
+    "net_content": false,
+    "lot_number": false,
+    "website": false
+  }
+}
+
+Rules:
+- ingredients: split the INCI section at every comma — one array element per token.
+  Each comma in the source creates exactly one new element, even if adjacent names could be read as a single compound.
+  Parentheses are part of the token — never split on them.
+  A line break in the middle of a name is a continuation — do NOT start a new element.
+  Only a comma starts a new element.
+  Stop at the first (+/-) or [(+/-)] token.
+
+- may_contain: split the text after (+/-) at every comma — one array element per token.
+  Each comma in the source creates exactly one new element.
+  A line break mid-name is a continuation — only commas separate elements.
+  Tokens that share a CI number but differ in any other character are separate elements — include every one.
+  [] if absent.
+
+- checklist: true if detectable anywhere in the consumer label, false if absent.
+  Detect presence only — do not extract values.
+  • ean: barcode (8 or 13 digits)
+  • manufacturer: brand or company name and address
+  • pao: open-jar symbol with a number and M
+  • country_of_origin: country of manufacture
+  • warnings: precautionary phrases or usage restrictions
+  • net_content: weight or volume
+  • lot_number: batch or lot reference
+  • website: web URL
+```
+
+```
+PROMPT_PACKAGE:
+
+You are performing verbatim text extraction from photos of a physical cosmetics package (EU Regulation 1223/2009).
+Your task is transcription — do not apply chemistry knowledge, do not merge or group names.
+Read every photo to build the complete ingredient list and detect regulatory fields.
+
+Output this JSON only — no prose, no markdown:
+{
+  "ingredients": [],
+  "may_contain": [],
+  "checklist": {
+    "ean": false,
+    "manufacturer": false,
+    "pao": false,
+    "country_of_origin": false,
+    "warnings": false,
+    "net_content": false,
+    "lot_number": false,
+    "website": false
+  }
+}
+
+Rules:
+- ingredients: split the INCI section at every comma — one array element per token.
+  Each comma in the source creates exactly one new element, even if adjacent names could be read as a single compound.
+  Parentheses are part of the token — never split on them.
+  A line break in the middle of a name is a continuation — do NOT start a new element.
+  Only a comma starts a new element.
+  Stop at the first (+/-) or [(+/-)] token.
+
+- may_contain: split the text after (+/-) at every comma — one array element per token.
+  Each comma in the source creates exactly one new element.
+  A line break mid-name is a continuation — only commas separate elements.
+  Tokens that share a CI number but differ in any other character are separate elements — include every one.
+  Check every photo — this section may appear on a different face. [] if absent.
+
+- checklist: true if detectable in any of the photos, false if absent or not visible.
+  Detect presence only — do not extract values.
+  • ean: barcode (8 or 13 digits)
+  • manufacturer: brand or company name and address
+  • pao: open-jar symbol with a number and M
+  • country_of_origin: country of manufacture
+  • warnings: precautionary phrases or usage restrictions
+  • net_content: weight or volume
+  • lot_number: batch or lot reference
+  • website: web URL
+```
 
 ---
 
