@@ -21,6 +21,16 @@ def _client() -> OpenAI:
     return OpenAI(api_key=settings.openai_api_key)
 
 
+def _mime_type(data: bytes) -> str:
+    if data[:3] == b'\xff\xd8\xff':
+        return "image/jpeg"
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return "image/webp"
+    return "image/jpeg"
+
+
 # Envía el PDF como data URL a la Responses API y extrae la etiqueta del artwork.
 def _extract_artwork(pdf_bytes: bytes) -> ArtworkLabel:
     b64 = base64.standard_b64encode(pdf_bytes).decode()
@@ -41,6 +51,7 @@ def _extract_artwork(pdf_bytes: bytes) -> ArtworkLabel:
     )
     record("openai", settings.openai_model, "artwork",
            response.usage.input_tokens, response.usage.output_tokens)
+    logger.debug("openai artwork raw:\n%s", response.output_text)
     return clean_artwork(parse_json(response.output_text))
 
 
@@ -49,7 +60,7 @@ def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
     content: list = [
         {
             "type": "input_image",
-            "image_url": f"data:image/jpeg;base64,{base64.standard_b64encode(photo).decode()}",
+            "image_url": f"data:{_mime_type(photo)};base64,{base64.standard_b64encode(photo).decode()}",
             "detail": "high",
         }
         for photo in photo_bytes_list
@@ -63,6 +74,7 @@ def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
     )
     record("openai", settings.openai_model, "package",
            response.usage.input_tokens, response.usage.output_tokens)
+    logger.debug("openai package raw:\n%s", response.output_text)
     return clean_inci(parse_json(response.output_text))
 
 
@@ -76,6 +88,7 @@ def _generate_narrative(report: ValidationReport) -> str:
     )
     record("openai", "gpt-4o-mini", "narrative",
            resp.usage.prompt_tokens, resp.usage.completion_tokens)
+    logger.debug("openai narrative raw:\n%s", resp.choices[0].message.content)
     return (resp.choices[0].message.content or "").strip()
 
 

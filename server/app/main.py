@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,10 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.validation import router
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
+# Silenciar librerías HTTP que volcarían base64 en sus propios DEBUG logs.
+for _noisy in ("httpx", "httpcore", "anthropic", "openai", "google", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 app = FastAPI(
     title="Packaging Validator",

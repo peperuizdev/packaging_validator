@@ -210,6 +210,9 @@ cp .env.example .env   # editar con tus claves
 uvicorn app.main:app --reload --reload-dir app
 # → http://localhost:8000
 # → http://localhost:8000/docs  (Swagger UI)
+
+# Para ver las respuestas raw de los LLM en terminal:
+uvicorn app.main:app --reload --reload-dir app --log-level debug
 ```
 
 ### Frontend

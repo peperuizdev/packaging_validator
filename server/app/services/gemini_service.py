@@ -23,9 +23,24 @@ from app.services.prompts import PROMPT_ARTWORK, PROMPT_PACKAGE, build_narrative
 logger = logging.getLogger(__name__)
 
 
-# Instancia el cliente Gemini con la API key de configuración.
+# Cliente singleton — evita que el SDK cierre la sesión HTTP entre llamadas.
+_gemini_client: genai.Client | None = None
+
 def _client() -> genai.Client:
-    return genai.Client(api_key=settings.gemini_api_key)
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
+    return _gemini_client
+
+
+def _mime_type(data: bytes) -> str:
+    if data[:3] == b'\xff\xd8\xff':
+        return "image/jpeg"
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return "image/webp"
+    return "image/jpeg"
 
 
 # Convierte cada página del PDF en PNG lossless para OCR visual.
@@ -59,6 +74,7 @@ def _generate(client: genai.Client, parts: list, model: str, phase: str) -> str:
     record("gemini", model, phase,  # type: ignore[arg-type]
            getattr(usage, "prompt_token_count", 0) or 0,
            getattr(usage, "candidates_token_count", 0) or 0)
+    logger.debug("gemini %s raw:\n%s", phase, raw)
     return raw
 
 
@@ -75,7 +91,7 @@ def _extract_artwork(pdf_bytes: bytes) -> ArtworkLabel:
 # Envía las fotos del embalaje y extrae la lista INCI del packaging físico.
 def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
     parts: list = [
-        gentypes.Part(inline_data=gentypes.Blob(mime_type="image/jpeg", data=photo))
+        gentypes.Part(inline_data=gentypes.Blob(mime_type=_mime_type(photo), data=photo))
         for photo in photo_bytes_list
     ]
     parts.append(gentypes.Part(text=PROMPT_PACKAGE))
@@ -97,6 +113,7 @@ def _generate_narrative(report: ValidationReport) -> str:
     record("gemini", narrative_model, "narrative",
            getattr(usage, "prompt_token_count", 0) or 0,
            getattr(usage, "candidates_token_count", 0) or 0)
+    logger.debug("gemini narrative raw:\n%s", response.text)
     return (response.text or "").strip()
 
 

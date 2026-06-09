@@ -21,6 +21,16 @@ def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
+def _mime_type(data: bytes) -> str:
+    if data[:3] == b'\xff\xd8\xff':
+        return "image/jpeg"
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return "image/webp"
+    return "image/jpeg"
+
+
 # Envía el PDF base64 a Claude y extrae la etiqueta del artwork.
 def _extract_artwork(pdf_bytes: bytes) -> ArtworkLabel:
     response = _client().messages.create(
@@ -43,6 +53,7 @@ def _extract_artwork(pdf_bytes: bytes) -> ArtworkLabel:
     )
     record("claude", settings.anthropic_model, "artwork",
            response.usage.input_tokens, response.usage.output_tokens)
+    logger.debug("claude artwork raw:\n%s", response.content[0].text)
     return clean_artwork(parse_json(response.content[0].text))
 
 
@@ -53,7 +64,7 @@ def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "image/jpeg",
+                "media_type": _mime_type(photo),
                 "data": base64.standard_b64encode(photo).decode(),
             },
         }
@@ -68,6 +79,7 @@ def _extract_package(photo_bytes_list: list[bytes]) -> InciLabel:
     )
     record("claude", settings.anthropic_model, "package",
            response.usage.input_tokens, response.usage.output_tokens)
+    logger.debug("claude package raw:\n%s", response.content[0].text)
     return clean_inci(parse_json(response.content[0].text))
 
 
@@ -80,6 +92,7 @@ def _generate_narrative(report: ValidationReport) -> str:
     )
     record("claude", "claude-haiku-4-5", "narrative",
            msg.usage.input_tokens, msg.usage.output_tokens)
+    logger.debug("claude narrative raw:\n%s", msg.content[0].text)
     return msg.content[0].text.strip()
 
 
